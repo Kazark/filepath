@@ -43,6 +43,71 @@ normalizeNameChar : Char -> Char
 normalizeNameChar '.' = '_'
 normalizeNameChar c = fromMaybe '_' $ validNameChar c
 
+normalize_name_char_never_returns_dot : Not (normalizeNameChar c = '.')
+normalize_name_char_never_returns_dot Refl impossible
+
+||| Valid names for files or directories. This does not include . or .., and we
+||| encode the dots separately from the other characters in order to ensure that
+||| does not happen: actually, we block any number of dots, unless there is a
+||| non-dot character to go along with it, since these filepaths are of
+||| questionable use and can cause odd behaviors on some platforms.
+|||
+||| Specifically, we encode the dots as a list of offsets where there are dots,
+||| and we encode the other characters as a head and tail (to ensure
+||| nonemptiness) of characters, subject to normalization at printing.
+record PathName where
+  constructor PName
+  dots : List Nat
+  hdcr : Char
+  chrs : List Char
+
+||| Convert the path name to the syntax in a list of characters.
+chars : PathName -> List Char
+chars (PName dots c cs) = chars' dots $ c :: cs where
+  chars' : List Nat -> List Char -> List Char
+  chars' [] ys = map normalizeNameChar ys
+  chars' (Z :: xs) ys = chars' xs ys
+  chars' xs@(_ :: _) [] = map (\_ => '.') xs
+  chars' ((S x) :: xs) (y :: ys) = y :: chars' (x :: xs) ys
+
+path_name_doesnt_include_dot_or_dotdot_etc : Not (chars n = replicate x '.')
+path_name_doesnt_include_dot_or_dotdot_etc Refl impossible
+
+Show PathName where
+  show = pack . chars
+
+data PathSeg = Name PathName | Parent
+
+isName : PathSeg -> Bool
+isName (Name _) = True
+isName _ = False
+
+Show PathSeg where
+  show (Name n) = show n
+  show Parent = ".."
+
+||| A path on the local filesystem, possibly rooted
+record LPath (rooted : Bool) where
+  constructor LocalPath
+  ||| The segments of the path, in reverse order form how they are displayed in
+  ||| the syntax
+  segs : List PathSeg
+
+HasName : LPath r -> Type
+HasName (LocalPath segs) =
+  length (filter isName segs) = 0
+
+record NetworkPath where
+  constructor NetworkP
+  ||| The remote host's name
+  host : PathSeg
+  ||| The path on the remote host
+  remotePath : List PathSeg
+
+data Path
+  = Local (LPath rooted)
+  | Remote NetworkPath
+
 ||| Path segment separator: `\` or `/`
 data PathSegSep = Backslash | Slash
 
